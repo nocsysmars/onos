@@ -15,6 +15,8 @@
  */
 package org.onosproject.net.device.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -80,8 +82,18 @@ import org.osgi.service.component.annotations.Modified;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.SocketTimeoutException;
+import java.net.URL;
+import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.Dictionary;
 import java.util.HashSet;
 import java.util.List;
@@ -108,6 +120,9 @@ import static com.google.common.collect.Multimaps.synchronizedListMultimap;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
 import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 import static java.lang.System.currentTimeMillis;
+import static org.onlab.accton.ConstantValue.ELASTICSEARCH_CONN_TIMEOUT;
+import static org.onlab.accton.ConstantValue.ELASTICSEARCH_READ_TIMEOUT;
+import static org.onlab.accton.Utility.*;
 import static org.onlab.util.Tools.get;
 import static org.onlab.util.Tools.groupedThreads;
 import static org.onosproject.net.MastershipRole.MASTER;
@@ -138,6 +153,8 @@ public class DeviceManager
     private static final String PORT_DESCRIPTION_NULL = "Port description cannot be null";
     private static final String PORT_DESC_LIST_NULL = "Port description list cannot be null";
     private static final String EVENT_NON_MASTER = "Non-master node cannot handle this event";
+    private static final String ES_URL = getEsUrl();
+    private static final String ES_DOC = getESDoc();
 
     private final Logger log = getLogger(getClass());
 
@@ -1007,6 +1024,11 @@ public class DeviceManager
             checkNotNull(deviceId, DEVICE_ID_NULL);
             checkNotNull(portStatistics, "Port statistics list cannot be null");
             checkValidity();
+            String timestamp = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'").format(new Date());
+
+            if (mastershipService.isLocalMaster(deviceId)) {
+                sendPortStatsToElasticsearch(deviceId, portStatistics);
+            }
 
             DeviceEvent event = store.updatePortStatistics(this.provider().id(),
                                                            deviceId, portStatistics);
@@ -1019,6 +1041,53 @@ public class DeviceManager
             checkValidity();
 
             return store.getDeviceDescription(provider().id(), deviceId);
+        }
+
+        private void sendPortStatsToElasticsearch(DeviceId deviceId, Collection<PortStatistics> portStatistics) {
+            try {
+                List<PortStatistics> sortedList = new ArrayList(portStatistics);
+                sortedList.sort(new ComparePortStatistics());
+                String timeStamp = getCurrentUtcTimeString();
+
+                for (PortStatistics stat : sortedList) {
+                    URL url = new URL(ES_URL + "portstats/" + ES_DOC + "/");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setDoOutput(true);
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setConnectTimeout(ELASTICSEARCH_CONN_TIMEOUT);
+                    conn.setReadTimeout(ELASTICSEARCH_READ_TIMEOUT);
+
+                    ObjectMapper mapper = new ObjectMapper();
+                    ObjectNode sendObjNode = mapper.createObjectNode();
+                    sendObjNode.put("port", stat.portNumber().toLong());
+                    sendObjNode.put("bytesReceived", stat.bytesReceived());
+                    sendObjNode.put("bytesSent", stat.bytesSent());
+                    sendObjNode.put("packetsReceived", stat.packetsReceived());
+                    sendObjNode.put("packetsSent", stat.packetsSent());
+                    sendObjNode.put("packetsRxDropped", stat.packetsRxDropped());
+                    sendObjNode.put("packetsTxDropped", stat.packetsTxDropped());
+                    sendObjNode.put("packetsRxErrors", stat.packetsRxErrors());
+                    sendObjNode.put("packetsTxErrors", stat.packetsTxErrors());
+                    sendObjNode.put("deviceId", deviceId.toString());
+                    sendObjNode.put("@timestamp", timeStamp);
+
+                    OutputStream os = conn.getOutputStream();
+                    os.write(sendObjNode.toString().getBytes());
+                    log.debug("put to elasticsearch" + sendObjNode.toString());
+                    os.flush();
+                    log.debug("[{}] ResponseMessage:{}", conn.getResponseCode(), conn.getResponseMessage());
+                    conn.disconnect();
+                }
+            } catch (MalformedURLException e) {
+                log.warn("{} MalformedURLException: {}", deviceId.toString(), e.getMessage());
+            } catch (SocketTimeoutException  e) {
+                log.warn("{} SocketTimeoutException: {}", deviceId.toString(), e.getMessage());
+            } catch (IOException e) {
+                log.warn("{} IOException: {}", deviceId.toString(), e.getMessage());
+            } catch (Exception e) {
+                log.warn("{} Exception: {}", deviceId.toString(), e.getMessage());
+            }
         }
     }
 
@@ -1554,6 +1623,23 @@ public class DeviceManager
         }
 
         return nextMaster;
+    }
+
+    private final class ComparePortStatistics implements Comparator<PortStatistics> {
+
+        @Override
+        public int compare(PortStatistics o1, PortStatistics o2) {
+            Long o1Port = o1.portNumber().toLong();
+            Long o2Port = o2.portNumber().toLong();
+            int res = o1Port.compareTo(o2Port);
+
+            if (res < 0) {
+                return -1;
+            } else if (res > 0) {
+                return +1;
+            }
+            return 0;
+        }
     }
 
     /**
