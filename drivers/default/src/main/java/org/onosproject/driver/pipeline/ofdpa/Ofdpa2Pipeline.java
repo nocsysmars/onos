@@ -1363,12 +1363,15 @@ public class Ofdpa2Pipeline extends AbstractHandlerBehaviour implements Pipeline
             for (Instruction ins : fwd.treatment().allInstructions()) {
                 if (ins instanceof OutputInstruction) {
                     OutputInstruction o = (OutputInstruction) ins;
+                    log.debug("Redirect to port {}", o.port());
+                    ttBuilder.add(o);
+                    /*
                     if (PortNumber.CONTROLLER.equals(o.port())) {
                         ttBuilder.add(o);
                     } else {
                         log.warn("Only allowed treatments in versatile forwarding "
                                 + "objectives are punts to the controller");
-                    }
+                    }*/
                 } else if (ins instanceof NoActionInstruction) {
                     // No action is allowed and nothing needs to be done
                 } else {
