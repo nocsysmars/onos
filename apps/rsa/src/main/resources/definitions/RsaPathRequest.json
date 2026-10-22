@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "title": "rsaPathRequest",
+  "required": [
+    "srcDevice",
+    "srcPort",
+    "dstDevice",
+    "dstPort",
+    "slots"
+  ],
+  "properties": {
+    "srcDevice": {
+      "type": "string",
+      "example": "null:0000000000000002"
+    },
+    "srcPort": {
+      "type": "string",
+      "example": "2"
+    },
+    "dstDevice": {
+      "type": "string",
+      "example": "null:0000000000000005"
+    },
+    "dstPort": {
+      "type": "string",
+      "example": "2"
+    },
+    "slots": {
+      "type": "integer",
+      "format": "int32",
+      "example": 4
+    }
+  }
+}
