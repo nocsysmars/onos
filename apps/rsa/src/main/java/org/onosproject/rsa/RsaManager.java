@@ -16,10 +16,12 @@
 
 package org.onosproject.rsa;
 
+import org.onlab.graph.ScalarWeight;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.net.ChannelSpacing;
 import org.onosproject.net.ConnectPoint;
+import org.onosproject.net.DefaultPath;
 import org.onosproject.net.FilteredConnectPoint;
 import org.onosproject.net.GridType;
 import org.onosproject.net.Link;
@@ -34,6 +36,8 @@ import org.onosproject.net.intent.Intent;
 import org.onosproject.net.intent.IntentService;
 import org.onosproject.net.intent.Key;
 import org.onosproject.net.intent.PointToPointIntent;
+import org.onosproject.net.optical.util.OpticalIntentUtility;
+import org.onosproject.net.provider.ProviderId;
 import org.onosproject.net.topology.PathService;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -73,8 +77,10 @@ import static org.slf4j.LoggerFactory.getLogger;
  * {@link PointToPointIntent} with {@code suggestedPath} set to the RSA-computed
  * links, and the selected wavelength attached to the selector as an
  * OchSignalCriterion. {@link #buildIntent} keeps an abstraction point: when both
- * endpoints are real OCH ports it is intended to switch to an optical intent for
- * a future real-ROADM (B-track) deployment. See docs/rsa-onos-app.md.</p>
+ * endpoints are real OCH ports it switches to an {@code OpticalConnectivityIntent}
+ * (via {@link OpticalIntentUtility}) for a real-ROADM (B-track) deployment, carrying
+ * the RSA-chosen path as {@code suggestedPath} and the selected 50 GHz wavelength as
+ * the ochSignal. See docs/rsa-onos-app.md and docs/rsa-real-roadm.md.</p>
  */
 @Component(immediate = true, service = RsaService.class)
 public class RsaManager implements RsaService {
@@ -88,6 +94,9 @@ public class RsaManager implements RsaService {
 
     // Default intent priority for RSA-submitted intents.
     private static final int INTENT_PRIORITY = 100;
+
+    // Provider id stamped on the suggestedPath carried by optical intents.
+    private static final ProviderId RSA_PROVIDER_ID = new ProviderId("rsa", "org.onosproject.rsa");
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected CoreService coreService;
@@ -240,10 +249,27 @@ public class RsaManager implements RsaService {
     private Intent buildIntent(String requestId, ConnectPoint src, ConnectPoint dst,
                                List<Link> links, OchSignal signal) {
         if (bothOchPorts(src, dst)) {
-            // TODO(RSA/B-track): real OCH ports present -> build an
-            // OpticalConnectivityIntent via OpticalIntentUtility for real ROADMs.
-            // Not reachable on the null-provider PoC; kept as an explicit hook.
-            log.info("Both endpoints are OCH ports; optical intent path reserved for B-track");
+            // Real OCH ports present (B-track / real-ROADM deployment): carry the
+            // RSA decision as an OpticalConnectivityIntent. The RSA-chosen links
+            // are wrapped into a suggestedPath so the optical compiler follows the
+            // selected route, and the chosen 50 GHz wavelength is passed as ochSignal.
+            Path suggestedPath = null;
+            if (!links.isEmpty()) {
+                suggestedPath = new DefaultPath(RSA_PROVIDER_ID, links, new ScalarWeight(links.size()));
+            }
+            Intent optical = OpticalIntentUtility.createOpticalIntent(
+                    src, dst, deviceService,
+                    Key.of("rsa-" + requestId, appId), appId,
+                    true, signal, suggestedPath);
+            if (optical != null) {
+                log.info("RSA request {}: both endpoints OCH -> OpticalConnectivityIntent "
+                        + "over {} hop(s)", requestId, links.size());
+                return optical;
+            }
+            // Fall back to the PointToPointIntent path below if the optical intent
+            // could not be created (e.g. ports no longer OCH at build time).
+            log.warn("RSA request {}: OCH endpoints but createOpticalIntent returned null; "
+                    + "falling back to PointToPointIntent", requestId);
         }
 
         TrafficSelector selector = DefaultTrafficSelector.builder()
