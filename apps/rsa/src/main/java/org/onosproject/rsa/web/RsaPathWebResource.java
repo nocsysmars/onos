@@ -16,13 +16,10 @@
 
 package org.onosproject.rsa.web;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.DeviceId;
-import org.onosproject.net.Link;
 import org.onosproject.net.PortNumber;
-import org.onosproject.net.optical.json.OchSignalCodec;
 import org.onosproject.rest.AbstractWebResource;
 import org.onosproject.rsa.RsaResult;
 import org.onosproject.rsa.RsaService;
@@ -152,33 +149,6 @@ public class RsaPathWebResource extends AbstractWebResource {
     }
 
     private ObjectNode encodeResult(RsaResult result) {
-        ObjectNode body = mapper().createObjectNode();
-        body.put("requestId", result.requestId());
-        body.put("blocked", false);
-        body.put("src", result.src().toString());
-        body.put("dst", result.dst().toString());
-        body.put("startSlot", result.startSlot());
-        body.put("width", result.width());
-
-        ArrayNode devices = body.putArray("devices");
-        if (!result.path().isEmpty()) {
-            devices.add(result.path().get(0).src().deviceId().toString());
-            for (Link link : result.path()) {
-                devices.add(link.dst().deviceId().toString());
-            }
-        }
-
-        ArrayNode links = body.putArray("links");
-        for (Link link : result.path()) {
-            ObjectNode l = mapper().createObjectNode();
-            l.put("src", link.src().toString());
-            l.put("dst", link.dst().toString());
-            links.add(l);
-        }
-
-        if (result.signal() != null) {
-            body.set("ochSignal", OchSignalCodec.encode(result.signal()));
-        }
-        return body;
+        return RsaJson.encodeResult(mapper(), result);
     }
 }

@@ -26,6 +26,12 @@ import java.util.Set;
 public class RsaWebApplication extends AbstractWebApplication {
     @Override
     public Set<Class<?>> getClasses() {
-        return getClasses(RsaPathWebResource.class);
+        return getClasses(
+                RsaPathWebResource.class,
+                RsaPathsWebResource.class,
+                RsaSpectrumWebResource.class,
+                RsaTopologyWebResource.class,
+                RsaStatsWebResource.class,
+                RsaCorsFilter.class);
     }
 }
