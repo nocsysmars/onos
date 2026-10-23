@@ -46,6 +46,9 @@ import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
 
+import com.google.common.collect.ImmutableList;
+
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -114,6 +117,7 @@ public class RsaManager implements RsaService {
 
     private final SpectrumTable spectrumTable = new SpectrumTable();
     private final AtomicLong requestCounter = new AtomicLong();
+    private final AtomicLong blockedCounter = new AtomicLong();
 
     // requestId -> result (for GET/DELETE) and requestId -> intent key (for withdraw).
     private final Map<String, RsaResult> results = new ConcurrentHashMap<>();
@@ -144,6 +148,7 @@ public class RsaManager implements RsaService {
     @Override
     public RsaResult assign(ConnectPoint src, ConnectPoint dst, int slots) {
         if (slots <= 0 || slots > spectrumTable.slotCount()) {
+            blockedCounter.incrementAndGet();
             return RsaResult.blocked(src, dst,
                     "Invalid slot count " + slots + " (table size " + spectrumTable.slotCount() + ")");
         }
@@ -154,6 +159,7 @@ public class RsaManager implements RsaService {
                 .collect(Collectors.toList());
 
         if (candidates.isEmpty()) {
+            blockedCounter.incrementAndGet();
             return RsaResult.blocked(src, dst,
                     "No path between " + src.deviceId() + " and " + dst.deviceId());
         }
@@ -167,6 +173,7 @@ public class RsaManager implements RsaService {
             }
         }
 
+        blockedCounter.incrementAndGet();
         return RsaResult.blocked(src, dst,
                 "No contiguous " + slots + "-slot segment free on any of the "
                         + candidates.size() + " candidate path(s)");
@@ -316,5 +323,25 @@ public class RsaManager implements RsaService {
     @Override
     public RsaResult get(String requestId) {
         return results.get(requestId);
+    }
+
+    @Override
+    public Collection<RsaResult> listActive() {
+        return ImmutableList.copyOf(results.values());
+    }
+
+    @Override
+    public int slotCount() {
+        return spectrumTable.slotCount();
+    }
+
+    @Override
+    public SpectrumTable.SpectrumSnapshot spectrumSnapshot() {
+        return spectrumTable.snapshot();
+    }
+
+    @Override
+    public long blockedCount() {
+        return blockedCounter.get();
     }
 }

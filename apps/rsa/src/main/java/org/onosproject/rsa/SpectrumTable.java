@@ -16,6 +16,8 @@
 
 package org.onosproject.rsa;
 
+import com.google.common.collect.ImmutableList;
+import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.LinkKey;
 
 import java.util.ArrayList;
@@ -173,5 +175,258 @@ public class SpectrumTable {
      */
     public synchronized boolean contains(String requestId) {
         return reservations.containsKey(requestId);
+    }
+
+    /**
+     * Immutable view of a single request's reservation on a link: the owning
+     * request id and the contiguous slot range it holds.
+     */
+    public static final class ReservationView {
+        private final String requestId;
+        private final int startSlot;
+        private final int width;
+
+        /**
+         * Creates a reservation view.
+         *
+         * @param requestId owning request identifier
+         * @param startSlot start slot index of the reserved segment
+         * @param width     number of slots reserved
+         */
+        public ReservationView(String requestId, int startSlot, int width) {
+            this.requestId = requestId;
+            this.startSlot = startSlot;
+            this.width = width;
+        }
+
+        /**
+         * Returns the owning request identifier.
+         *
+         * @return request id
+         */
+        public String requestId() {
+            return requestId;
+        }
+
+        /**
+         * Returns the start slot index of the reserved segment.
+         *
+         * @return start slot
+         */
+        public int startSlot() {
+            return startSlot;
+        }
+
+        /**
+         * Returns the number of slots reserved.
+         *
+         * @return width
+         */
+        public int width() {
+            return width;
+        }
+    }
+
+    /**
+     * Immutable occupancy view of a single undirected link.
+     */
+    public static final class LinkSpectrum {
+        private final ConnectPoint src;
+        private final ConnectPoint dst;
+        private final int slotCount;
+        private final List<Integer> occupiedSlots;
+        private final int freeSlotCount;
+        private final int maxContiguousFree;
+        private final List<ReservationView> reservations;
+
+        /**
+         * Creates a link spectrum view.
+         *
+         * @param src               undirected key source endpoint
+         * @param dst               undirected key destination endpoint
+         * @param slotCount         number of slots on the link
+         * @param occupiedSlots     sorted indices of occupied slots
+         * @param freeSlotCount     number of free slots
+         * @param maxContiguousFree longest run of consecutive free slots
+         * @param reservations      reservations held on this link
+         */
+        public LinkSpectrum(ConnectPoint src, ConnectPoint dst, int slotCount,
+                            List<Integer> occupiedSlots, int freeSlotCount,
+                            int maxContiguousFree, List<ReservationView> reservations) {
+            this.src = src;
+            this.dst = dst;
+            this.slotCount = slotCount;
+            this.occupiedSlots = ImmutableList.copyOf(occupiedSlots);
+            this.freeSlotCount = freeSlotCount;
+            this.maxContiguousFree = maxContiguousFree;
+            this.reservations = ImmutableList.copyOf(reservations);
+        }
+
+        /**
+         * Returns the undirected key source endpoint.
+         *
+         * @return source connect point
+         */
+        public ConnectPoint src() {
+            return src;
+        }
+
+        /**
+         * Returns the undirected key destination endpoint.
+         *
+         * @return destination connect point
+         */
+        public ConnectPoint dst() {
+            return dst;
+        }
+
+        /**
+         * Returns the number of slots on the link.
+         *
+         * @return slot count
+         */
+        public int slotCount() {
+            return slotCount;
+        }
+
+        /**
+         * Returns the sorted indices of occupied slots.
+         *
+         * @return immutable list of occupied slot indices
+         */
+        public List<Integer> occupiedSlots() {
+            return occupiedSlots;
+        }
+
+        /**
+         * Returns the number of free slots.
+         *
+         * @return free slot count
+         */
+        public int freeSlotCount() {
+            return freeSlotCount;
+        }
+
+        /**
+         * Returns the longest run of consecutive free slots.
+         *
+         * @return max contiguous free slot count
+         */
+        public int maxContiguousFree() {
+            return maxContiguousFree;
+        }
+
+        /**
+         * Returns the reservations held on this link.
+         *
+         * @return immutable list of reservation views
+         */
+        public List<ReservationView> reservations() {
+            return reservations;
+        }
+    }
+
+    /**
+     * Immutable snapshot of the whole spectrum table: the per-link slot count
+     * and one {@link LinkSpectrum} per undirected link that has occupancy.
+     */
+    public static final class SpectrumSnapshot {
+        private final int slotCount;
+        private final List<LinkSpectrum> links;
+
+        /**
+         * Creates a spectrum snapshot.
+         *
+         * @param slotCount number of slots per link
+         * @param links     per-link occupancy views
+         */
+        public SpectrumSnapshot(int slotCount, List<LinkSpectrum> links) {
+            this.slotCount = slotCount;
+            this.links = ImmutableList.copyOf(links);
+        }
+
+        /**
+         * Returns the number of slots per link.
+         *
+         * @return slot count
+         */
+        public int slotCount() {
+            return slotCount;
+        }
+
+        /**
+         * Returns the per-link occupancy views.
+         *
+         * @return immutable list of link spectra
+         */
+        public List<LinkSpectrum> links() {
+            return links;
+        }
+    }
+
+    /**
+     * Builds an immutable snapshot of current occupancy and reservations.
+     *
+     * <p>For each undirected link with occupancy this reports the occupied slot
+     * indices, the free slot count, the longest run of consecutive free slots,
+     * and the per-request reservations ({@code requestId}, {@code startSlot},
+     * {@code width}) attached to that link. The snapshot is a point-in-time copy
+     * and does not reflect subsequent mutations.</p>
+     *
+     * @return current spectrum snapshot
+     */
+    public synchronized SpectrumSnapshot snapshot() {
+        // Group reservations by their (undirected) link so each LinkSpectrum
+        // can carry the reservations that apply to it.
+        Map<LinkKey, List<ReservationView>> byLink = new ConcurrentHashMap<>();
+        for (Map.Entry<String, List<Reservation>> entry : reservations.entrySet()) {
+            String requestId = entry.getKey();
+            for (Reservation r : entry.getValue()) {
+                byLink.computeIfAbsent(r.link, k -> new ArrayList<>())
+                        .add(new ReservationView(requestId, r.startSlot, r.width));
+            }
+        }
+
+        List<LinkSpectrum> linkViews = new ArrayList<>();
+        for (Map.Entry<LinkKey, BitSet> entry : occupancy.entrySet()) {
+            LinkKey key = entry.getKey();
+            BitSet bs = entry.getValue();
+
+            List<Integer> occupied = new ArrayList<>();
+            for (int i = bs.nextSetBit(0); i >= 0 && i < slotCount; i = bs.nextSetBit(i + 1)) {
+                occupied.add(i);
+            }
+
+            int freeSlotCount = slotCount - occupied.size();
+            int maxContiguousFree = longestZeroRun(bs);
+
+            List<ReservationView> linkReservations =
+                    byLink.getOrDefault(key, new ArrayList<>());
+
+            linkViews.add(new LinkSpectrum(key.src(), key.dst(), slotCount,
+                    occupied, freeSlotCount, maxContiguousFree, linkReservations));
+        }
+
+        return new SpectrumSnapshot(slotCount, linkViews);
+    }
+
+    /**
+     * Returns the length of the longest run of consecutive free (clear) slots
+     * within [0, slotCount).
+     */
+    private int longestZeroRun(BitSet bs) {
+        int longest = 0;
+        int current = 0;
+        for (int i = 0; i < slotCount; i++) {
+            if (bs.get(i)) {
+                current = 0;
+            } else {
+                current++;
+                if (current > longest) {
+                    longest = current;
+                }
+            }
+        }
+        return longest;
     }
 }

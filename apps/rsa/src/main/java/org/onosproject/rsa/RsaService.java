@@ -56,4 +56,32 @@ public interface RsaService {
      * @return the stored result, or null
      */
     RsaResult get(String requestId);
+
+    /**
+     * Returns all currently-accepted, not-yet-released results.
+     *
+     * @return an immutable collection of active RSA results
+     */
+    java.util.Collection<RsaResult> listActive();
+
+    /**
+     * Returns the number of 50 GHz slots per link in the spectrum table.
+     *
+     * @return slot count per link
+     */
+    int slotCount();
+
+    /**
+     * Returns a point-in-time snapshot of current spectrum occupancy.
+     *
+     * @return current spectrum snapshot
+     */
+    SpectrumTable.SpectrumSnapshot spectrumSnapshot();
+
+    /**
+     * Returns the total number of assign requests that have been blocked.
+     *
+     * @return blocked request count
+     */
+    long blockedCount();
 }
