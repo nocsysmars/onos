@@ -1,0 +1,7 @@
+{
+  "task_id": "task-rsa-readonly-rest",
+  "task_description": "Add a complete set of read-only (GET) REST endpoints to the existing RSA ONOS app so an external web UI (via nginx reverse proxy reading ONOS REST directly) can render rich visualizations: topology routing, spectrum slot-occupancy heatmaps, live lightpath list, and KPI stats. Endpoints: GET /onos/rsa/paths, /onos/rsa/spectrum, /onos/rsa/topology, /onos/rsa/stats. Add CORS (Access-Control-Allow-Origin + OPTIONS preflight) scoped to the RSA web package only. Backend-only; no frontend. Must be purely additive: existing POST/GET/DELETE /onos/rsa/path/{id}, assign/release/get, SpectrumTable methods, and the null-provider + real-OchPort intent paths must be unchanged. Rebuild the .oar, hotswap into the live onos-mno-27 ONOS (namespace ai-optical, ONOS 2.7.0, REST onos:rocks), curl-test every endpoint, then push to GitHub.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

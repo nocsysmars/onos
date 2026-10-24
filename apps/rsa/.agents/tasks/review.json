@@ -1,0 +1,10 @@
+{
+  "verdict": "APPROVED",
+  "findings": [],
+  "summary": "RSA read-only REST surface is correct, purely additive, and CORS is RSA-scoped. Verified against git diff (base 31650651d8) and FEAT-001/002/003 evidence.",
+  "checks": {
+    "four_endpoints_camelCase": "PASS — GET /onos/rsa/paths, /spectrum, /topology, /stats registered in RsaWebApplication and live-verified HTTP 200 with camelCase JSON (FEAT-003 curl transcripts). /paths reuses shared RsaJson.encodeResult so it matches the single-result shape. Stats KPI math verified live (usedSlots 8, overallUtilization 0.25).",
+    "cors_scoped_to_rsa": "PASS — RsaCorsFilter is registered ONLY in RsaWebApplication.getClasses(); it decorates the /onos/rsa context only and touches no other ONOS REST surface. Cross-origin GET carries Access-Control-Allow-Origin. Unauthenticated OPTIONS preflight is 401'd by ONOS's controller-wide Karaf auth before reaching the RSA app; correctly resolved at the nginx proxy per the user's explicit decision (option A), not by loosening global auth.",
+    "purely_additive": "PASS — git diff shows zero removed lines in SpectrumTable.java and RsaManager.java. The only edit with removals is RsaPathWebResource.encodeResult, extracted verbatim (identical field set/order/logic) into RsaJson.encodeResult; legacy POST/GET/DELETE /onos/rsa/path[/{id}] HTTP behavior unchanged and live-verified 201/200/204. SpectrumTable isFree/occupy/release/contains/slotCount unchanged. RsaManager assign/release/get and the null-provider vs real-OchPort branch (buildIntent/bothOchPorts) unchanged; blockedCounter increments were inserted at the three existing blocked-return sites only."
+  }
+}
