@@ -29,6 +29,7 @@ public class RsaWebApplication extends AbstractWebApplication {
         return getClasses(
                 RsaPathWebResource.class,
                 RsaPathsWebResource.class,
+                RsaEndpointMapWebResource.class,
                 RsaSpectrumWebResource.class,
                 RsaTopologyWebResource.class,
                 RsaStatsWebResource.class,

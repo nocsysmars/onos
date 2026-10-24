@@ -21,6 +21,7 @@ import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.PortNumber;
 import org.onosproject.rest.AbstractWebResource;
+import org.onosproject.rsa.EndpointMapService;
 import org.onosproject.rsa.RsaResult;
 import org.onosproject.rsa.RsaService;
 import org.slf4j.Logger;
@@ -48,9 +49,17 @@ import static org.slf4j.LoggerFactory.getLogger;
  * REST resource for RSA (Routing and Spectrum Assignment) requests.
  *
  * <ul>
- *   <li>{@code POST /onos/rsa/path} — submit a demand
- *       {@code {srcDevice, srcPort, dstDevice, dstPort, slots}}; returns the
- *       chosen path + assigned spectrum + requestId, or a blocked result.</li>
+ *   <li>{@code POST /onos/rsa/path} — submit a demand. Two mutually exclusive
+ *       body shapes are accepted:
+ *       <ul>
+ *         <li>device/port mode: {@code {srcDevice, srcPort, dstDevice, dstPort,
+ *             slots}} (original, unchanged).</li>
+ *         <li>podRef mode: {@code {srcPodRef, dstPodRef, slots}} — each podRef is
+ *             translated to an OWS device/port via {@link EndpointMapService}
+ *             before reusing the same {@link RsaService#assign} core.</li>
+ *       </ul>
+ *       Returns the chosen path + assigned spectrum + requestId, or a blocked
+ *       result.</li>
  *   <li>{@code DELETE /onos/rsa/path/{id}} — release a request (withdraw intent,
  *       reclaim slots).</li>
  *   <li>{@code GET /onos/rsa/path/{id}} — inspect an accepted request.</li>
@@ -65,6 +74,8 @@ public class RsaPathWebResource extends AbstractWebResource {
     private static final String SRC_PORT = "srcPort";
     private static final String DST_DEVICE = "dstDevice";
     private static final String DST_PORT = "dstPort";
+    private static final String SRC_POD_REF = "srcPodRef";
+    private static final String DST_POD_REF = "dstPodRef";
     private static final String SLOTS = "slots";
     private static final String MISSING = " member is required";
 
@@ -85,14 +96,41 @@ public class RsaPathWebResource extends AbstractWebResource {
         try {
             ObjectNode root = readTreeFromStream(mapper(), stream);
 
-            String srcDevice = nullIsIllegal(root.get(SRC_DEVICE), SRC_DEVICE + MISSING).asText();
-            String srcPort = nullIsIllegal(root.get(SRC_PORT), SRC_PORT + MISSING).asText();
-            String dstDevice = nullIsIllegal(root.get(DST_DEVICE), DST_DEVICE + MISSING).asText();
-            String dstPort = nullIsIllegal(root.get(DST_PORT), DST_PORT + MISSING).asText();
             int slots = nullIsIllegal(root.get(SLOTS), SLOTS + MISSING).asInt();
 
-            ConnectPoint src = new ConnectPoint(DeviceId.deviceId(srcDevice), PortNumber.portNumber(srcPort));
-            ConnectPoint dst = new ConnectPoint(DeviceId.deviceId(dstDevice), PortNumber.portNumber(dstPort));
+            ConnectPoint src;
+            ConnectPoint dst;
+
+            if (root.get(SRC_POD_REF) != null) {
+                // podRef mode: translate each podRef to an OWS device/port via the
+                // endpoint-map, then reuse the existing assign() core unchanged.
+                String srcPodRef = nullIsIllegal(root.get(SRC_POD_REF), SRC_POD_REF + MISSING).asText();
+                String dstPodRef = nullIsIllegal(root.get(DST_POD_REF), DST_POD_REF + MISSING).asText();
+
+                EndpointMapService endpointMap = get(EndpointMapService.class);
+                EndpointMapService.Entry srcEntry = endpointMap.get(srcPodRef);
+                if (srcEntry == null) {
+                    return unknownPodRef(srcPodRef);
+                }
+                EndpointMapService.Entry dstEntry = endpointMap.get(dstPodRef);
+                if (dstEntry == null) {
+                    return unknownPodRef(dstPodRef);
+                }
+
+                src = new ConnectPoint(DeviceId.deviceId(srcEntry.owsDevice()),
+                        PortNumber.portNumber(srcEntry.owsPort()));
+                dst = new ConnectPoint(DeviceId.deviceId(dstEntry.owsDevice()),
+                        PortNumber.portNumber(dstEntry.owsPort()));
+            } else {
+                // device/port mode (original, unchanged).
+                String srcDevice = nullIsIllegal(root.get(SRC_DEVICE), SRC_DEVICE + MISSING).asText();
+                String srcPort = nullIsIllegal(root.get(SRC_PORT), SRC_PORT + MISSING).asText();
+                String dstDevice = nullIsIllegal(root.get(DST_DEVICE), DST_DEVICE + MISSING).asText();
+                String dstPort = nullIsIllegal(root.get(DST_PORT), DST_PORT + MISSING).asText();
+
+                src = new ConnectPoint(DeviceId.deviceId(srcDevice), PortNumber.portNumber(srcPort));
+                dst = new ConnectPoint(DeviceId.deviceId(dstDevice), PortNumber.portNumber(dstPort));
+            }
 
             RsaResult result = get(RsaService.class).assign(src, dst, slots);
 
@@ -146,6 +184,13 @@ public class RsaPathWebResource extends AbstractWebResource {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
         return Response.noContent().build();
+    }
+
+    private Response unknownPodRef(String podRef) {
+        ObjectNode body = mapper().createObjectNode();
+        body.put("blocked", true);
+        body.put("reason", "unknown podRef " + podRef);
+        return Response.status(Response.Status.CONFLICT).entity(body).build();
     }
 
     private ObjectNode encodeResult(RsaResult result) {
